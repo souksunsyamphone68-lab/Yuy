@@ -1,0 +1,338 @@
+-- LocalScript: วางไว้ใน StarterPlayerScripts หรือ StarterGui
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Stats = game:GetService("Stats")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ค่าคอนฟิกเริ่มต้น
+local isTargeting = false
+local currentTarget = nil
+local showFps = true
+local showFov = true
+local fovRadius = 120 -- ขนาดรัศมีวงกลม FOV
+
+-- ==========================================
+-- 1. สร้าง ScreenGui หลัก
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SoukScriptGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ==========================================
+-- 2. สร้าง UI แสดง FPS มุมซ้ายบน
+-- ==========================================
+local topLeftFpsLabel = Instance.new("TextLabel")
+topLeftFpsLabel.Name = "TopLeftFpsLabel"
+topLeftFpsLabel.Size = UDim2.new(0, 180, 0, 30)
+topLeftFpsLabel.Position = UDim2.new(0, 10, 0, 10)
+topLeftFpsLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+topLeftFpsLabel.BackgroundTransparency = 0.3
+topLeftFpsLabel.Text = " FPS: 0 | Ping: 0ms"
+topLeftFpsLabel.TextColor3 = Color3.fromRGB(85, 255, 85)
+topLeftFpsLabel.TextSize = 14
+topLeftFpsLabel.Font = Enum.Font.Code
+topLeftFpsLabel.TextXAlignment = Enum.TextXAlignment.Left
+topLeftFpsLabel.Visible = true
+topLeftFpsLabel.Parent = screenGui
+
+local fpsCorner = Instance.new("UICorner")
+fpsCorner.CornerRadius = UDim.new(0, 6)
+fpsCorner.Parent = topLeftFpsLabel
+
+-- ==========================================
+-- 3. สร้างวงกลม FOV สีแดง (ใช้ Frame + UICorner แทน Drawing API เพื่อความเสถียร)
+-- ==========================================
+local fovFrame = Instance.new("Frame")
+fovFrame.Name = "FovCircle"
+fovFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+fovFrame.Size = UDim2.new(0, fovRadius * 2, 0, fovRadius * 2)
+fovFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+fovFrame.BackgroundTransparency = 1
+fovFrame.BorderSizePixel = 0
+fovFrame.Visible = true
+fovFrame.Parent = screenGui
+
+local fovStroke = Instance.new("UIStroke")
+fovStroke.Color = Color3.fromRGB(255, 0, 0) -- สีแดง
+fovStroke.Thickness = 2
+fovStroke.Transparency = 0
+fovStroke.Parent = fovFrame
+
+local fovCorner = Instance.new("UICorner")
+fovCorner.CornerRadius = UDim.new(1, 0) -- ทำให้เป็นวงกลมสมบูรณ์
+fovCorner.Parent = fovFrame
+
+-- ==========================================
+-- 4. สร้าง UI หน้าต่างควบคุม (สีขาว ชื่อ souk)
+-- ==========================================
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 280, 0, 270)
+mainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 10)
+uiCorner.Parent = mainFrame
+
+-- หัวข้อ "souk"
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
+titleLabel.Size = UDim2.new(0.7, 0, 0, 40)
+titleLabel.Position = UDim2.new(0.05, 0, 0, 5)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "souk"
+titleLabel.TextColor3 = Color3.fromRGB(30, 30, 30)
+titleLabel.TextSize = 24
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = mainFrame
+
+-- ปุ่มซ่อนหน้าต่าง [ - ]
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(0.85, 0, 0.03, 0)
+closeBtn.BackgroundColor3 = Color3.fromRGB(230, 230, 230)
+closeBtn.Text = "-"
+closeBtn.TextColor3 = Color3.fromRGB(50, 50, 50)
+closeBtn.TextSize = 20
+closeBtn.Font = Enum.Font.SourceSansBold
+closeBtn.Parent = mainFrame
+
+local closeBtnCorner = Instance.new("UICorner")
+closeBtnCorner.CornerRadius = UDim.new(0, 6)
+closeBtnCorner.Parent = closeBtn
+
+-- ปุ่ม Toggle ล็อคเป้า
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleButton"
+toggleBtn.Size = UDim2.new(0.9, 0, 0, 38)
+toggleBtn.Position = UDim2.new(0.05, 0, 0.2, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
+toggleBtn.Text = "Lock-On: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(200, 40, 40)
+toggleBtn.TextSize = 15
+toggleBtn.Font = Enum.Font.SourceSansSemiBold
+toggleBtn.Parent = mainFrame
+
+-- ปุ่ม Toggle FOV วงสีแดง
+local fovBtn = Instance.new("TextButton")
+fovBtn.Name = "FovButton"
+fovBtn.Size = UDim2.new(0.9, 0, 0, 38)
+fovBtn.Position = UDim2.new(0.05, 0, 0.38, 0)
+fovBtn.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
+fovBtn.Text = "Red FOV Circle: ON"
+fovBtn.TextColor3 = Color3.fromRGB(0, 160, 0)
+fovBtn.TextSize = 15
+fovBtn.Font = Enum.Font.SourceSansSemiBold
+fovBtn.Parent = mainFrame
+
+-- ปุ่ม Toggle แสดง FPS
+local fpsBtn = Instance.new("TextButton")
+fpsBtn.Name = "FpsButton"
+fpsBtn.Size = UDim2.new(0.9, 0, 0, 38)
+fpsBtn.Position = UDim2.new(0.05, 0, 0.56, 0)
+fpsBtn.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
+fpsBtn.Text = "Top-Left FPS: ON"
+fpsBtn.TextColor3 = Color3.fromRGB(0, 160, 0)
+fpsBtn.TextSize = 15
+fpsBtn.Font = Enum.Font.SourceSansSemiBold
+fpsBtn.Parent = mainFrame
+
+-- ส่วนปรับขนาดวงกลม FOV
+local fovSizeLabel = Instance.new("TextLabel")
+fovSizeLabel.Size = UDim2.new(0.9, 0, 0, 35)
+fovSizeLabel.Position = UDim2.new(0.05, 0, 0.75, 0)
+fovSizeLabel.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
+fovSizeLabel.Text = " FOV Size: " .. fovRadius
+fovSizeLabel.TextColor3 = Color3.fromRGB(50, 50, 50)
+fovSizeLabel.TextSize = 14
+fovSizeLabel.Font = Enum.Font.SourceSansSemiBold
+fovSizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+fovSizeLabel.Parent = mainFrame
+
+local addFovBtn = Instance.new("TextButton")
+addFovBtn.Size = UDim2.new(0, 30, 0, 25)
+addFovBtn.Position = UDim2.new(0.68, 0, 0.15, 0)
+addFovBtn.BackgroundColor3 = Color3.fromRGB(220, 220, 220)
+addFovBtn.Text = "+"
+addFovBtn.TextSize = 16
+addFovBtn.Parent = fovSizeLabel
+
+local subFovBtn = Instance.new("TextButton")
+subFovBtn.Size = UDim2.new(0, 30, 0, 25)
+subFovBtn.Position = UDim2.new(0.82, 0, 0.15, 0)
+subFovBtn.BackgroundColor3 = Color3.fromRGB(220, 220, 220)
+subFovBtn.Text = "-"
+subFovBtn.TextSize = 16
+subFovBtn.Parent = fovSizeLabel
+
+-- ใส่ UICorner ให้ปุ่มต่างๆ
+for _, v in pairs({toggleBtn, fovBtn, fpsBtn, fovSizeLabel, addFovBtn, subFovBtn}) do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = v
+end
+
+-- ปุ่มเปิดหน้าต่างคืน
+local openButton = Instance.new("TextButton")
+openButton.Name = "OpenButton"
+openButton.Size = UDim2.new(0, 90, 0, 35)
+openButton.Position = UDim2.new(0.02, 0, 0.15, 0)
+openButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+openButton.Text = "Open [souk]"
+openButton.TextColor3 = Color3.fromRGB(30, 30, 30)
+openButton.TextSize = 13
+openButton.Font = Enum.Font.SourceSansBold
+openButton.Visible = false
+openButton.Parent = screenGui
+
+local openBtnCorner = Instance.new("UICorner")
+openBtnCorner.CornerRadius = UDim.new(0, 6)
+openBtnCorner.Parent = openButton
+
+-- ==========================================
+-- 5. ฟังก์ชันค้นหาเป้าหมายภายในวงกลม
+-- ==========================================
+local function getClosestInFOV()
+    local closestPlayer = nil
+    local shortestDistance = fovRadius
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local headPos, onScreen = Camera:WorldToViewportPoint(player.Character.Head.Position)
+                if onScreen then
+                    local screenDist = (Vector2.new(headPos.X, headPos.Y) - mousePos).Magnitude
+                    if screenDist <= shortestDistance then
+                        shortestDistance = screenDist
+                        closestPlayer = player
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+-- ตรวจสอบว่าเป้าหมายปัจจุบันยังอยู่ในระยะหรือไม่
+local function isTargetValid(target)
+    if not target or not target.Character or not target.Character:FindFirstChild("Head") then
+        return false
+    end
+    local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then
+        return false
+    end
+
+    local mousePos = UserInputService:GetMouseLocation()
+    local headPos, onScreen = Camera:WorldToViewportPoint(target.Character.Head.Position)
+    if not onScreen then return false end
+
+    local screenDist = (Vector2.new(headPos.X, headPos.Y) - mousePos).Magnitude
+    return screenDist <= fovRadius
+end
+
+-- ==========================================
+-- 6. Event Handlers (ปุ่มกด)
+-- ==========================================
+toggleBtn.MouseButton1Click:Connect(function()
+    isTargeting = not isTargeting
+    toggleBtn.Text = isTargeting and "Lock-On: ON" or "Lock-On: OFF"
+    toggleBtn.TextColor3 = isTargeting and Color3.fromRGB(0, 160, 0) or Color3.fromRGB(200, 40, 40)
+    if not isTargeting then currentTarget = nil end
+end)
+
+fovBtn.MouseButton1Click:Connect(function()
+    showFov = not showFov
+    fovBtn.Text = showFov and "Red FOV Circle: ON" or "Red FOV Circle: OFF"
+    fovBtn.TextColor3 = showFov and Color3.fromRGB(0, 160, 0) or Color3.fromRGB(200, 40, 40)
+    fovFrame.Visible = showFov
+end)
+
+fpsBtn.MouseButton1Click:Connect(function()
+    showFps = not showFps
+    fpsBtn.Text = showFps and "Top-Left FPS: ON" or "Top-Left FPS: OFF"
+    fpsBtn.TextColor3 = showFps and Color3.fromRGB(0, 160, 0) or Color3.fromRGB(200, 40, 40)
+    topLeftFpsLabel.Visible = showFps
+end)
+
+addFovBtn.MouseButton1Click:Connect(function()
+    fovRadius = fovRadius + 10
+    fovFrame.Size = UDim2.new(0, fovRadius * 2, 0, fovRadius * 2)
+    fovSizeLabel.Text = " FOV Size: " .. fovRadius
+end)
+
+subFovBtn.MouseButton1Click:Connect(function()
+    if fovRadius > 20 then
+        fovRadius = fovRadius - 10
+        fovFrame.Size = UDim2.new(0, fovRadius * 2, 0, fovRadius * 2)
+        fovSizeLabel.Text = " FOV Size: " .. fovRadius
+    end
+end)
+
+local function toggleUI()
+    mainFrame.Visible = not mainFrame.Visible
+    openButton.Visible = not mainFrame.Visible
+end
+
+closeBtn.MouseButton1Click:Connect(toggleUI)
+openButton.MouseButton1Click:Connect(toggleUI)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        toggleUI()
+    end
+end)
+
+-- ==========================================
+-- 7. Main Loop (RenderStepped)
+-- ==========================================
+local lastUpdate = 0
+local frameCount = 0
+
+RunService.RenderStepped:Connect(function(dt)
+    -- อัปเดตตำแหน่งวงกลม FOV ตามตำแหน่งเมาส์
+    local mousePos = UserInputService:GetMouseLocation()
+    fovFrame.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y)
+
+    -- ระบบ Lock-On
+    if isTargeting then
+        if not isTargetValid(currentTarget) then
+            currentTarget = getClosestInFOV()
+        end
+
+        if currentTarget and currentTarget.Character and currentTarget.Character:FindFirstChild("Head") then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, currentTarget.Character.Head.Position)
+        end
+    end
+
+    -- คำนวณ FPS และ Ping ปลอดภัยจาก Error
+    frameCount = frameCount + 1
+    lastUpdate = lastUpdate + dt
+    if lastUpdate >= 0.5 then
+        local currentFps = math.floor(frameCount / lastUpdate)
+        frameCount = 0
+        lastUpdate = 0
+
+        if showFps then
+            local ping = 0
+            pcall(function()
+                ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+            end)
+            topLeftFpsLabel.Text = " FPS: " .. currentFps .. " | Ping: " .. ping .. "ms"
+        end
+    end
+end)
